@@ -93,7 +93,6 @@ export default function RoomPage() {
           }
         });
 
-        //lalalallala
 
         // Subscribe to previews
         const sub2 = subscribeToPreview(stompClient, roomId, (msg) => {
