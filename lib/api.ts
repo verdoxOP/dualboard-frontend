@@ -46,6 +46,10 @@ export async function joinRoom(inviteCode: string): Promise<Room> {
   });
 }
 
+export async function fetchRoom(roomId: string): Promise<Room> {
+  return apiFetch<Room>(`/api/v1/rooms/${roomId}`);
+}
+
 // History
 export async function fetchRoomHistory(roomId: string): Promise<Stroke[]> {
   return apiFetch<Stroke[]>(`/api/v1/rooms/${roomId}/history`);
