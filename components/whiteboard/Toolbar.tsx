@@ -17,7 +17,6 @@ interface ToolbarProps {
   setTool: (t: Tool) => void;
   onUndo: () => void;
   canUndo: boolean;
-  inviteCode?: string;
 }
 
 export default function Toolbar({
@@ -29,7 +28,6 @@ export default function Toolbar({
   setTool,
   onUndo,
   canUndo,
-  inviteCode,
 }: ToolbarProps) {
   const tools: { value: Tool; label: string; icon: string }[] = [
     { value: "pen", label: "Pen", icon: "✏️" },
@@ -37,12 +35,6 @@ export default function Toolbar({
     { value: "rectangle", label: "Rectangle", icon: "⬜" },
     { value: "circle", label: "Circle", icon: "⭕" },
   ];
-
-  const copyInviteCode = () => {
-    if (inviteCode) {
-      navigator.clipboard.writeText(inviteCode);
-    }
-  };
 
   return (
     <div className="absolute top-0 left-0 right-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm">
@@ -135,17 +127,6 @@ export default function Toolbar({
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Share / Invite Code */}
-        {inviteCode && (
-          <button
-            onClick={copyInviteCode}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors shrink-0"
-            title="Copy invite code"
-          >
-            <span>📋</span>
-            <span className="font-mono">{inviteCode}</span>
-          </button>
-        )}
       </div>
     </div>
   );

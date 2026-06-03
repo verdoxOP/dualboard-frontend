@@ -2,21 +2,15 @@
 
 import { useSession } from "@/components/providers/SessionProvider";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, useCallback, useRef } from "react";
-import { fetchRoomHistory } from "@/lib/api";
-import {
-  createStompClient,
-  subscribeToRoom,
-  subscribeToPreview,
-  publishStroke,
-  publishPreview,
-} from "@/lib/stomp";
-import { Stroke, Tool } from "@/types/drawing";
+import { useEffect, useState, useCallback } from "react";
+import { fetchRoom } from "@/lib/api";
+import { useRoomDrawingSync } from "@/hooks/useRoomDrawingSync";
+import { Tool } from "@/types/drawing";
 import { DEFAULT_COLOR, DEFAULT_BRUSH_SIZE } from "@/lib/constants";
 import Canvas from "@/components/whiteboard/Canvas";
 import Toolbar from "@/components/whiteboard/Toolbar";
 import ConnectionStatus from "@/components/whiteboard/ConnectionStatus";
-import { Client, StompSubscription } from "@stomp/stompjs";
+import InviteCodeOverlay from "@/components/whiteboard/InviteCodeOverlay";
 
 export default function RoomPage() {
   const { user, loading: sessionLoading, isAuthenticated } = useSession();
@@ -24,10 +18,6 @@ export default function RoomPage() {
   const router = useRouter();
   const roomId = params.id as string;
 
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const [previewStrokes, setPreviewStrokes] = useState<Stroke[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | undefined>();
 
   // Drawing state
@@ -35,9 +25,15 @@ export default function RoomPage() {
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
 
-  // Refs for STOMP
-  const clientRef = useRef<Client | null>(null);
-  const subsRef = useRef<StompSubscription[]>([]);
+  const {
+    strokes,
+    previewStrokes,
+    connected,
+    historyLoading,
+    publishStroke,
+    publishPreview,
+    handleUndo,
+  } = useRoomDrawingSync(roomId, user?.id, isAuthenticated);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -46,139 +42,22 @@ export default function RoomPage() {
     }
   }, [sessionLoading, isAuthenticated, router]);
 
-  // Load history
-  const loadHistory = useCallback(async () => {
+  const loadRoom = useCallback(async () => {
     if (!roomId) return;
-    setHistoryLoading(true);
     try {
-      const history = await fetchRoomHistory(roomId);
-      setStrokes(history);
+      const room = await fetchRoom(roomId);
+      setInviteCode(room.inviteCode);
     } catch (err) {
-      console.error("Failed to load room history:", err);
-    } finally {
-      setHistoryLoading(false);
+      console.error("Failed to load room details:", err);
+      setInviteCode(undefined);
     }
   }, [roomId]);
 
   useEffect(() => {
     if (isAuthenticated && roomId) {
-      loadHistory();
+      loadRoom();
     }
-  }, [isAuthenticated, roomId, loadHistory]);
-
-  // Connect STOMP
-  useEffect(() => {
-    if (!isAuthenticated || !roomId) return;
-
-    const client = createStompClient(
-      (stompClient) => {
-        setConnected(true);
-
-        // Subscribe to final strokes
-        const sub1 = subscribeToRoom(stompClient, roomId, (msg) => {
-          try {
-            const stroke: Stroke = JSON.parse(msg.body);
-            // Only add strokes from other users
-            if (stroke.userId !== user?.id) {
-              setStrokes((prev) => [...prev, stroke]);
-            }
-            // Clear preview for this user
-            if (stroke.userId) {
-              setPreviewStrokes((prev) =>
-                prev.filter((p) => p.userId !== stroke.userId)
-              );
-            }
-          } catch (e) {
-            console.error("Failed to parse stroke message:", e);
-          }
-        });
-
-
-        // Subscribe to previews
-        const sub2 = subscribeToPreview(stompClient, roomId, (msg) => {
-          try {
-            const preview: Stroke = JSON.parse(msg.body);
-            if (preview.userId !== user?.id) {
-              setPreviewStrokes((prev) => {
-                const filtered = prev.filter(
-                  (p) => p.userId !== preview.userId
-                );
-                return [...filtered, preview];
-              });
-            }
-          } catch (e) {
-            console.error("Failed to parse preview message:", e);
-          }
-        });
-
-        subsRef.current = [sub1, sub2];
-      },
-      () => {
-        setConnected(false);
-      },
-      () => {
-        // On STOMP error — will auto-reconnect
-        setConnected(false);
-      }
-    );
-
-    clientRef.current = client;
-    client.activate();
-
-    return () => {
-      subsRef.current.forEach((s) => {
-        try {
-          s.unsubscribe();
-        } catch {}
-      });
-      subsRef.current = [];
-      client.deactivate();
-      clientRef.current = null;
-    };
-  }, [isAuthenticated, roomId, user?.id]);
-
-  // Re-fetch history on reconnect
-  useEffect(() => {
-    if (connected && roomId) {
-      loadHistory();
-    }
-  }, [connected, roomId, loadHistory]);
-
-  // Handlers
-  const handleStrokeComplete = useCallback(
-    (stroke: Stroke) => {
-      // Add locally immediately
-      setStrokes((prev) => [...prev, stroke]);
-
-      // Publish to server
-      if (clientRef.current?.connected) {
-        publishStroke(clientRef.current, roomId, {
-          type: stroke.type,
-          payload: stroke.payload,
-        });
-      }
-    },
-    [roomId]
-  );
-
-  const handlePreview = useCallback(
-    (stroke: Stroke) => {
-      if (clientRef.current?.connected) {
-        publishPreview(clientRef.current, roomId, {
-          type: stroke.type,
-          payload: stroke.payload,
-        });
-      }
-    },
-    [roomId]
-  );
-
-  const handleUndo = useCallback(() => {
-    setStrokes((prev) => {
-      if (prev.length === 0) return prev;
-      return prev.slice(0, -1);
-    });
-  }, []);
+  }, [isAuthenticated, roomId, loadRoom]);
 
   if (sessionLoading) {
     return (
@@ -203,8 +82,9 @@ export default function RoomPage() {
         setTool={setTool}
         onUndo={handleUndo}
         canUndo={strokes.length > 0}
-        inviteCode={inviteCode}
       />
+
+      <InviteCodeOverlay inviteCode={inviteCode} />
 
       {historyLoading ? (
         <div className="flex items-center justify-center w-full h-full">
@@ -221,8 +101,8 @@ export default function RoomPage() {
             tool={tool}
             color={color}
             brushSize={brushSize}
-            onStrokeComplete={handleStrokeComplete}
-            onPreview={handlePreview}
+            onStrokeComplete={publishStroke}
+            onPreview={publishPreview}
           />
         </div>
       )}
